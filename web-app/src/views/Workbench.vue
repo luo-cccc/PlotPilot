@@ -80,24 +80,6 @@
         <n-button size="small" secondary @click="cancelRunningTask">终止任务</n-button>
       </n-space>
     </n-modal>
-
-    <n-drawer
-      v-model:show="streamDraftVisible"
-      :height="420"
-      placement="bottom"
-      :trap-focus="false"
-      :auto-focus="false"
-    >
-      <n-drawer-content title="流式撰稿区（正文同步，可编辑）" closable>
-        <n-input
-          v-model:value="streamText"
-          type="textarea"
-          placeholder="生成中正文会追加到此；可边生成边改。"
-          :autosize="{ minRows: 14, maxRows: 28 }"
-          class="stream-draft-input"
-        />
-      </n-drawer-content>
-    </n-drawer>
   </div>
 </template>
 
