@@ -25,7 +25,15 @@
     </header>
 
     <div class="cast-body">
-      <div ref="netContainer" class="net-wrap" />
+      <div class="net-wrap">
+        <GraphChart
+          :nodes="echartsNodes"
+          :links="echartsLinks"
+          height="100%"
+          @node-click="handleNodeClick"
+          @edge-click="handleEdgeClick"
+        />
+      </div>
       <aside class="cast-side">
         <n-collapse :default-expanded-names="['cov']" class="cov-collapse">
           <n-collapse-item title="正文与关系图" name="cov">
@@ -193,9 +201,8 @@
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui'
-import { Network } from 'vis-network'
-import { DataSet } from 'vis-data'
-import 'vis-network/styles/vis-network.css'
+import GraphChart from '../components/charts/GraphChart.vue'
+import { convertGraph, type VisNode, type VisEdge, type EChartsNode, type EChartsLink } from '../utils/visToEcharts'
 import { bookApi } from '../api/book'
 
 interface StoryEventRow {
@@ -229,9 +236,6 @@ const route = useRoute()
 const router = useRouter()
 const message = useMessage()
 const slug = route.params.slug as string
-
-const netContainer = ref<HTMLElement | null>(null)
-let network: Network | null = null
 
 const graph = ref<{ characters: CastCharacter[]; relationships: CastRelationship[] }>({
   characters: [],
@@ -351,7 +355,7 @@ const removeRelEvent = (ei: number) => {
 
 const buildVisData = () => {
   const hi = highlightIds.value
-  const nodes = graph.value.characters.map(c => {
+  const nodes: VisNode[] = graph.value.characters.map(c => {
     const ne = (c.story_events || []).length
     const base = [c.name, ...(c.aliases || []), c.traits, c.note].filter(Boolean).join('\n')
     const title = ne ? `${base}\n—\n人物线事件 ${ne} 条` : base
@@ -363,7 +367,7 @@ const buildVisData = () => {
       font: { size: 14 },
     }
   })
-  const edges = graph.value.relationships.map(r => {
+  const edges: VisEdge[] = graph.value.relationships.map(r => {
     const ne = (r.story_events || []).length
     const base = [r.label, r.note].filter(Boolean).join('\n')
     const title = ne ? `${base || '关系'}\n—\n共同经历 ${ne} 条` : base || undefined
@@ -377,88 +381,45 @@ const buildVisData = () => {
       font: { size: 11, align: 'middle' },
     }
   })
-  return {
-    nodes: new DataSet(nodes),
-    edges: new DataSet(edges),
+  return convertGraph(nodes, edges)
+}
+
+const echartsNodes = computed(() => buildVisData().nodes)
+const echartsLinks = computed(() => buildVisData().links)
+
+const handleNodeClick = (node: EChartsNode) => {
+  const c = graph.value.characters.find(x => x.id === node.id)
+  if (c) {
+    castPane.value = 'node'
+    formChar.value = {
+      id: c.id,
+      name: c.name,
+      aliasesStr: (c.aliases || []).join(', '),
+      role: c.role || '',
+      traits: c.traits || '',
+      note: c.note || '',
+      events: mapEventsFromApi(c.story_events),
+    }
   }
 }
 
-const applyFocusFromQuery = () => {
-  const fid = route.query.focus
-  if (!fid || !network) return
-  const id = String(fid)
-  if (!graph.value.characters.some(x => x.id === id)) return
-  try {
-    network.selectNodes([id])
-    network.focus(id, {
-      scale: 1.12,
-      animation: {
-        duration: 520,
-        easingFunction: 'easeInOutQuad',
-      },
-    })
-  } catch {
-    /* vis 偶发 */
+const handleEdgeClick = (link: EChartsLink) => {
+  // Find relationship by matching source and target
+  const r = graph.value.relationships.find(
+    x => x.source_id === link.source && x.target_id === link.target
+  )
+  if (r) {
+    castPane.value = 'edge'
+    formRel.value = {
+      id: r.id,
+      source_id: r.source_id,
+      target_id: r.target_id,
+      label: r.label || '',
+      note: r.note || '',
+      directed: r.directed,
+      events: mapEventsFromApi(r.story_events),
+    }
   }
-}
-
-const redraw = async () => {
-  await nextTick()
-  if (!netContainer.value) return
-  const { nodes, edges } = buildVisData()
-  const data = { nodes, edges }
-  const options = {
-    physics: { stabilization: { iterations: 120 } },
-    edges: { smooth: false },
-    nodes: {
-      shape: 'box',
-      margin: { top: 8, right: 10, bottom: 8, left: 10 },
-      borderWidth: 2,
-    },
-    interaction: { hover: true, multiselect: false },
-  }
-  if (network) {
-    network.setData(data)
-    network.stabilize()
-  } else {
-    network = new Network(netContainer.value, data, options)
-    network.on('click', params => {
-      if (params.edges.length) {
-        const rid = String(params.edges[0])
-        const r = graph.value.relationships.find(x => x.id === rid)
-        if (r) {
-          castPane.value = 'edge'
-          formRel.value = {
-            id: r.id,
-            source_id: r.source_id,
-            target_id: r.target_id,
-            label: r.label || '',
-            note: r.note || '',
-            directed: r.directed,
-            events: mapEventsFromApi(r.story_events),
-          }
-        }
-        return
-      }
-      if (!params.nodes.length) return
-      const id = String(params.nodes[0])
-      const c = graph.value.characters.find(x => x.id === id)
-      if (c) {
-        castPane.value = 'node'
-        formChar.value = {
-          id: c.id,
-          name: c.name,
-          aliasesStr: (c.aliases || []).join(', '),
-          role: c.role || '',
-          traits: c.traits || '',
-          note: c.note || '',
-          events: mapEventsFromApi(c.story_events),
-        }
-      }
-    })
-  }
-  await nextTick()
-  applyFocusFromQuery()
 }
 
 const loadCoverage = async () => {
@@ -474,7 +435,6 @@ const loadCoverage = async () => {
 
 const focusCastNode = (id: string) => {
   router.replace({ query: { ...route.query, focus: id } })
-  void nextTick(() => applyFocusFromQuery())
 }
 
 const goChapter = (cid: number) => {
@@ -491,7 +451,6 @@ const reload = async () => {
     }
     highlightIds.value = new Set()
     searchQ.value = ''
-    await redraw()
     await loadCoverage()
   } catch {
     message.error('加载失败')
@@ -505,7 +464,6 @@ const onSearch = () => {
     const q = searchQ.value.trim()
     if (!q) {
       highlightIds.value = new Set()
-      await redraw()
       return
     }
     try {
@@ -519,7 +477,6 @@ const onSearch = () => {
         ids.add(r.target_id)
       })
       highlightIds.value = ids
-      await redraw()
     } catch {
       message.error('检索失败')
     }
@@ -549,7 +506,6 @@ const applyCharacter = () => {
   const i = graph.value.characters.findIndex(c => c.id === id)
   if (i >= 0) graph.value.characters[i] = next
   else graph.value.characters.push(next)
-  void redraw()
   message.success('已写入（记得点保存同步到服务器）')
 }
 
@@ -563,7 +519,6 @@ const removeCharacter = () => {
   graph.value.characters = graph.value.characters.filter(c => c.id !== id)
   graph.value.relationships = graph.value.relationships.filter(r => r.source_id !== id && r.target_id !== id)
   newCharacter()
-  void redraw()
   message.success('已从图中移除（保存后生效）')
 }
 
@@ -589,7 +544,6 @@ const applyRelationship = () => {
   if (i >= 0) graph.value.relationships[i] = next
   else graph.value.relationships.push(next)
   formRel.value.id = rid
-  void redraw()
   message.success('关系已写入（记得保存）')
 }
 
@@ -597,7 +551,6 @@ const removeRelationship = () => {
   const id = formRel.value.id.trim()
   if (!id) return
   graph.value.relationships = graph.value.relationships.filter(r => r.id !== id)
-  void redraw()
   message.success('已移除')
 }
 
@@ -622,21 +575,12 @@ const goWorkbench = () => {
   router.push(`/book/${slug}/workbench`)
 }
 
-watch(
-  () => route.query.focus,
-  () => {
-    void nextTick(() => applyFocusFromQuery())
-  }
-)
-
 onMounted(async () => {
   await reload()
 })
 
 onUnmounted(() => {
   if (searchTimer) clearTimeout(searchTimer)
-  network?.destroy()
-  network = null
 })
 </script>
 

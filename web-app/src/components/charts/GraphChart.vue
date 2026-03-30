@@ -36,6 +36,7 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   nodeClick: [node: GraphNode]
+  edgeClick: [link: GraphLink]
 }>()
 
 const chartOption = computed<EChartsOption>(() => ({
@@ -76,6 +77,8 @@ const chartOption = computed<EChartsOption>(() => ({
 const handleNodeClick = (params: EChartsEventParams) => {
   if (params.dataType === 'node') {
     emit('nodeClick', params.data as GraphNode)
+  } else if (params.dataType === 'edge') {
+    emit('edgeClick', params.data as GraphLink)
   }
 }
 </script>
