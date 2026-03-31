@@ -1,0 +1,9 @@
+"""Setup file for aitext package"""
+from setuptools import setup, find_packages
+
+setup(
+    name="aitext",
+    version="0.1.0",
+    packages=find_packages(exclude=["tests*"]),
+    python_requires=">=3.9",
+)
