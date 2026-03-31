@@ -47,3 +47,11 @@ class Novel(BaseEntity):
     def completed_chapters(self) -> int:
         """已完成章节数"""
         return len([c for c in self.chapters if c.status == ChapterStatus.COMPLETED])
+
+    def get_total_word_count(self):
+        """获取总字数"""
+        from domain.novel.value_objects.word_count import WordCount
+        total = WordCount(0)
+        for chapter in self.chapters:
+            total = total + chapter.word_count
+        return total
