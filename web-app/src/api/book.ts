@@ -21,6 +21,23 @@ import type {
 } from '../types/api'
 
 // Legacy API client (old /api endpoints)
+// DEPRECATED: This file is maintained for backward compatibility only.
+// Do NOT use these APIs in new code.
+//
+// Current dependencies (as of 2026-04-01):
+// - bookApi: BiblePanel.vue, CastGraphCompact.vue, KnowledgePanel.vue,
+//            KnowledgeTripleGraph.vue, useWorkbench.ts, Cast.vue, Chapter.vue
+// - chatApi: ChatArea.vue
+// - jobApi: JobStatusIndicator.vue, useWorkbench.ts
+//
+// For new code, use the RESTful API clients:
+// - novelApi from './novel.ts' for novel operations
+// - chapterApi from './chapter.ts' for chapter operations
+// - bibleApi from './bible.ts' for bible operations
+// - aiApi from './ai.ts' for AI generation
+//
+// TODO: Migrate existing components to new API clients before removing this file.
+
 const request = axios.create({
   baseURL: '/api',
   timeout: 30000,
@@ -28,12 +45,6 @@ const request = axios.create({
 
 // 添加响应拦截器，直接返回数据
 request.interceptors.response.use(response => response.data)
-
-// Note: For new RESTful API endpoints, use:
-// - novelApi from './novel.ts' for novel operations
-// - chapterApi from './chapter.ts' for chapter operations
-// - bibleApi from './bible.ts' for bible operations
-// - aiApi from './ai.ts' for AI generation
 
 export const bookApi = {
   getList: () => request.get<BookListItem[]>('/books') as Promise<BookListItem[]>,
