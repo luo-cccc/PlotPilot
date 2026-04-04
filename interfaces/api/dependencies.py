@@ -6,7 +6,10 @@ import logging
 import os
 from pathlib import Path
 from functools import lru_cache
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from application.services.scene_director_service import SceneDirectorService
 
 from application.paths import DATA_DIR
 from infrastructure.persistence.storage.file_storage import FileStorage
@@ -406,3 +409,22 @@ def get_macro_planning_service() -> MacroPlanningService:
         story_node_repo=get_story_node_repository(),
         llm_client=llm_client
     )
+
+
+def get_scene_director_service() -> "SceneDirectorService":
+    """获取场景导演服务
+
+    Returns:
+        SceneDirectorService 实例
+    """
+    from application.services.scene_director_service import SceneDirectorService
+
+    settings = _anthropic_settings(require_key=False)
+    if settings:
+        llm_service = AnthropicProvider(settings)
+        logger.info("Using AnthropicProvider for scene director")
+    else:
+        from infrastructure.ai.providers.mock_provider import MockProvider
+        llm_service = MockProvider()
+        logger.warning("No API key found, using MockProvider for scene director")
+    return SceneDirectorService(llm_service=llm_service)
