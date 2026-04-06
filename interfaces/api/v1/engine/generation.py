@@ -85,50 +85,6 @@ class GenerateChapterRequest(BaseModel):
     scene_director_result: Optional[dict] = Field(None, description="可选的场记分析结果")
 
 
-class ConsistencyIssueResponse(BaseModel):
-    """一致性问题响应"""
-    type: str
-    severity: str
-    description: str
-    location: int
-
-
-class GhostAnnotationResponse(BaseModel):
-    """幽灵批注响应"""
-    type: str
-    severity: str
-    message: str
-    entity_id: Optional[str] = None
-    entity_name: Optional[str] = None
-    expected: Optional[str] = None
-    actual: Optional[str] = None
-
-
-class StyleWarningResponse(BaseModel):
-    """风格警告响应"""
-    pattern: str
-    text: str
-    start: int
-    end: int
-    severity: str
-
-
-class ConsistencyReportResponse(BaseModel):
-    """一致性报告响应"""
-    issues: List[ConsistencyIssueResponse]
-    warnings: List[ConsistencyIssueResponse]
-    suggestions: List[str]
-
-
-class GenerateChapterResponse(BaseModel):
-    """生成章节响应"""
-    content: str
-    consistency_report: ConsistencyReportResponse
-    token_count: int
-    ghost_annotations: List[GhostAnnotationResponse] = Field(default_factory=list, description="幽灵批注（冲突检测结果）")
-    style_warnings: List[StyleWarningResponse] = Field(default_factory=list, description="风格警告（俗套句式检测结果）")
-
-
 class StorylineResponse(BaseModel):
     """故事线响应"""
     id: str
@@ -215,129 +171,6 @@ class HostedWriteStreamRequest(BaseModel):
 
 
 # Endpoints
-@router.post(
-    "/{novel_id}/generate-chapter",
-    response_model=GenerateChapterResponse,
-    status_code=status.HTTP_200_OK
-)
-async def generate_chapter(
-    novel_id: str,
-    request: GenerateChapterRequest,
-    workflow: AutoNovelGenerationWorkflow = Depends(get_auto_workflow)
-):
-    """生成章节（完整工作流）
-
-    整合所有组件完成章节生成：
-    - 构建 35K token 上下文
-    - 调用 LLM 生成
-    - 一致性检查
-    - 返回结果和报告
-    """
-    logger.info(f"API 请求: POST /{novel_id}/generate-chapter")
-    logger.info(f"  章节号: {request.chapter_number}")
-    logger.info(f"  大纲长度: {len(request.outline)} 字符")
-
-    try:
-        # 转换 scene_director_result 为 SceneDirectorAnalysis（如果提供）
-        scene_director = None
-        if request.scene_director_result:
-            scene_director = SceneDirectorAnalysis(**request.scene_director_result)
-
-        result = await workflow.generate_chapter(
-            novel_id=novel_id,
-            chapter_number=request.chapter_number,
-            outline=request.outline,
-            scene_director=scene_director
-        )
-
-        # 转换一致性报告
-        issues = [
-            ConsistencyIssueResponse(
-                type=issue.type.value,
-                severity=issue.severity.value,
-                description=issue.description,
-                location=issue.location
-            )
-            for issue in result.consistency_report.issues
-        ]
-
-        warnings = [
-            ConsistencyIssueResponse(
-                type=warning.type.value,
-                severity=warning.severity.value,
-                description=warning.description,
-                location=warning.location
-            )
-            for warning in result.consistency_report.warnings
-        ]
-
-        # 转换幽灵批注
-        ghost_annotations = [
-            GhostAnnotationResponse(
-                type=annotation.type,
-                severity=annotation.severity,
-                message=annotation.message,
-                entity_id=annotation.entity_id,
-                entity_name=getattr(annotation, 'entity_name', None),
-                expected=getattr(annotation, 'expected', None),
-                actual=getattr(annotation, 'actual', None)
-            )
-            for annotation in result.ghost_annotations
-        ]
-
-        # 转换风格警告
-        style_warnings = [
-            StyleWarningResponse(
-                pattern=warning.pattern,
-                text=warning.text,
-                start=warning.start,
-                end=warning.end,
-                severity=warning.severity
-            )
-            for warning in result.style_warnings
-        ]
-
-        logger.info(f"API 响应: 生成成功")
-        logger.info(f"  内容长度: {len(result.content)} 字符")
-        logger.info(f"  Token 数: {result.token_count}")
-        logger.info(f"  问题数: {len(issues)}, 警告数: {len(warnings)}")
-        logger.info(f"  幽灵批注数: {len(ghost_annotations)}")
-        logger.info(f"  风格警告数: {len(style_warnings)}")
-
-        # 检查幕是否完成，自动创建下一幕
-        try:
-            structure_service = get_structure_ai_service()
-            completion_check = await structure_service.check_act_completion(
-                novel_id=novel_id,
-                chapter_number=request.chapter_number
-            )
-            if completion_check.get("should_create_next"):
-                logger.info(f"当前幕已完成，自动创建下一幕")
-        except Exception as e:
-            logger.warning(f"幕完成检查失败（不影响章节生成）: {e}")
-
-        return GenerateChapterResponse(
-            content=result.content,
-            consistency_report=ConsistencyReportResponse(
-                issues=issues,
-                warnings=warnings,
-                suggestions=result.consistency_report.suggestions
-            ),
-            token_count=result.token_count,
-            ghost_annotations=ghost_annotations,
-            style_warnings=style_warnings
-        )
-    except ValueError as e:
-        logger.error(f"API 错误: 参数无效 - {e}")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except Exception as e:
-        logger.exception(f"API 错误: 生成失败")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Generation failed: {str(e)}"
-        )
-
-
 @router.post(
     "/{novel_id}/generate-chapter-stream",
     status_code=status.HTTP_200_OK,
@@ -427,28 +260,6 @@ async def hosted_write_stream(
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
         },
-    )
-
-
-@router.get(
-    "/{novel_id}/consistency-report",
-    response_model=ConsistencyReportResponse,
-    status_code=status.HTTP_200_OK
-)
-async def get_consistency_report(
-    novel_id: str,
-    workflow: AutoNovelGenerationWorkflow = Depends(get_auto_workflow)
-):
-    """获取最新的一致性报告
-
-    注意：这需要先调用 generate_chapter 生成内容
-    """
-    # 简化实现：返回空报告
-    # 实际应该从缓存或数据库获取最新报告
-    return ConsistencyReportResponse(
-        issues=[],
-        warnings=[],
-        suggestions=[]
     )
 
 
@@ -846,10 +657,6 @@ async def review_chapter(
 ):
     """章节审稿：AI 审稿并返回修改建议"""
     try:
-        # 使用 workflow 的 generate_chapter_with_review 方法
-        # 这个方法会生成内容并返回一致性报告
-        # 我们可以基于一致性报告生成审稿建议
-
         # 读取章节内容
         chapter = chapter_service.get_chapter(novel_id, chapter_number)
         if not chapter:

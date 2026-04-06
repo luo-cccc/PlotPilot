@@ -168,10 +168,21 @@ export async function consumeGenerateChapterStream(
             handlers.onEvent?.(ev)
             handlers.onChunk?.(text)
           } else if (typ === 'done') {
+            const rawReport = o.consistency_report
+            const consistency_report: ConsistencyReportDTO =
+              rawReport && typeof rawReport === 'object'
+                ? (rawReport as ConsistencyReportDTO)
+                : { issues: [], warnings: [], suggestions: [] }
             const result: GenerateChapterWorkflowResponse = {
               content: String(o.content ?? ''),
-              consistency_report: o.consistency_report as ConsistencyReportDTO,
+              consistency_report,
               token_count: Number(o.token_count ?? 0),
+            }
+            if (Array.isArray(o.style_warnings)) {
+              result.style_warnings = o.style_warnings as StyleWarning[]
+            }
+            if (o.ghost_annotations != null) {
+              result.ghost_annotations = o.ghost_annotations as unknown[]
             }
             const ev: GenerateChapterStreamEvent = { type: 'done', ...result }
             handlers.onEvent?.(ev)
@@ -255,23 +266,6 @@ export async function consumeHostedWriteStream(
 }
 
 export const workflowApi = {
-  /**
-   * POST /api/v1/novels/{novel_id}/generate-chapter
-   * AutoNovelGenerationWorkflow：上下文 + 生成 + 一致性报告（子项目 8）
-   */
-  generateChapterWithContext: (novelId: string, data: GenerateChapterWithContextPayload) =>
-    apiClient.post<GenerateChapterWorkflowResponse>(
-      `/novels/${novelId}/generate-chapter`,
-      data,
-      { timeout: 180_000 }
-    ) as unknown as Promise<GenerateChapterWorkflowResponse>,
-
-  /** GET /api/v1/novels/{novel_id}/consistency-report */
-  getConsistencyReport: (novelId: string, chapter?: number) =>
-    apiClient.get<unknown>(`/novels/${novelId}/consistency-report`, {
-      params: chapter != null ? { chapter } : {},
-    }) as Promise<unknown>,
-
   /** GET /api/v1/novels/{novel_id}/storylines */
   getStorylines: (novelId: string) =>
     apiClient.get<StorylineDTO[]>(`/novels/${novelId}/storylines`) as unknown as Promise<StorylineDTO[]>,

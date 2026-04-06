@@ -104,7 +104,14 @@
           </n-tab-pane>
 
           <n-tab-pane name="chapter-status" tab="📋 章节状态">
-            <ChapterStatusPanel :chapter="currentChapter" :read-only="isAssistedReadOnly" />
+            <ChapterStatusPanel
+              :chapter="currentChapter"
+              :read-only="isAssistedReadOnly"
+              :last-workflow-result="lastWorkflowResult"
+              :qc-chapter-number="lastQcChapterNumber"
+              @clear-qc="clearWorkflowQc"
+              @go-editor="activeTab = 'editor'"
+            />
           </n-tab-pane>
 
           <n-tab-pane name="chapter-elements" tab="🧩 章节元素">
@@ -130,46 +137,64 @@
       </div>
     </div>
 
-    <!-- AI 生成本章弹窗 -->
+    <!-- AI 生成本章弹窗（流式 + 质检结果在「章节状态」） -->
     <n-modal
       v-model:show="showGenerateModal"
       preset="card"
-      title="AI 生成本章"
+      title="AI 生成本章（含一致性检查）"
       style="width: min(820px, 96vw); max-height: min(92vh, 900px)"
       :segmented="{ content: true, footer: 'soft' }"
-      :mask-closable="!generating"
+      :mask-closable="!generateInProgress"
     >
       <template #header-extra>
-        <n-text depth="3" style="font-size: 12px">流式生成，实时显示</n-text>
+        <n-text depth="3" style="font-size: 12px">同一流式接口；报告在章节状态</n-text>
       </template>
 
       <n-scrollbar style="max-height: min(78vh, 760px)">
         <n-space vertical :size="20">
           <n-alert type="info" :show-icon="true">
-            为当前章节生成内容，支持自定义大纲。生成完成后可编辑并保存。
+            选择目标章节与大纲后流式生成。一致性报告与俗套句式命中会出现在「章节状态」；此处可审阅正文并保存到所选章节。
           </n-alert>
 
           <n-card title="配置" size="small" :bordered="false">
             <n-space vertical :size="16">
-              <n-form-item label="章节" label-placement="left" label-width="80">
-                <n-text>第 {{ currentChapter?.number }} 章 - {{ currentChapter?.title }}</n-text>
+              <n-form-item label="目标章节" label-placement="left" label-width="80">
+                <n-select
+                  v-model:value="generateTargetChapterId"
+                  :options="chapterSelectOptions"
+                  placeholder="选择要生成的章节"
+                  :disabled="generateInProgress"
+                  filterable
+                />
               </n-form-item>
 
-              <n-form-item label="大纲" label-placement="left" label-width="80">
+              <n-form-item label-placement="left" label-width="80" :show-feedback="false">
+                <template #label>
+                  <n-space :size="6" align="center">
+                    <span>大纲</span>
+                    <n-tag v-if="outlineBlurAnalyzing" size="tiny" type="info" round>
+                      场景预分析中…
+                    </n-tag>
+                    <n-tag v-else-if="blurSceneCache" size="tiny" type="success" round>
+                      已预分析
+                    </n-tag>
+                  </n-space>
+                </template>
                 <n-input
                   v-model:value="generateOutline"
                   type="textarea"
-                  placeholder="输入章节大纲（可选，留空则使用默认大纲）"
-                  :autosize="{ minRows: 3, maxRows: 6 }"
-                  :disabled="generating"
+                  placeholder="输入大纲（可选，留空则使用默认）；失焦后自动预分析场景（供生成时复用）"
+                  :autosize="{ minRows: 3, maxRows: 8 }"
+                  :disabled="generateInProgress"
+                  @blur="onOutlineBlurAnalyze"
                 />
               </n-form-item>
 
               <n-form-item label="场记分析" label-placement="left" label-width="80" :show-feedback="false">
                 <n-space align="center" :size="8">
-                  <n-switch v-model:value="useSceneDirector" :disabled="generating" size="small" />
+                  <n-switch v-model:value="useSceneDirector" :disabled="generateInProgress" size="small" />
                   <n-text depth="3" style="font-size: 12px">
-                    生成前分析场景（精准过滤出场角色/地点，提升上下文质量）
+                    若失焦未预分析，则在点击生成时再分析场景（与预分析二选一即可）
                   </n-text>
                 </n-space>
               </n-form-item>
@@ -181,12 +206,18 @@
               <n-button
                 type="primary"
                 @click="handleStartGenerate"
-                :loading="generating"
-                :disabled="generating || isAssistedReadOnly"
+                :loading="generateInProgress"
+                :disabled="generateInProgress || isAssistedReadOnly || generateTargetChapterId == null"
                 size="medium"
                 block
               >
-                {{ generating ? (analyzingScene ? '分析场景中...' : '生成中...') : '开始生成' }}
+                {{
+                  generateInProgress
+                    ? analyzingScene
+                      ? '分析场景中...'
+                      : '生成中...'
+                    : '开始生成'
+                }}
               </n-button>
             </n-space>
           </n-card>
@@ -209,7 +240,7 @@
                 </n-button>
               </n-space>
             </template>
-            <template v-if="contextPreview">
+            <template v-if="contextPreview && modalTargetChapter">
               <!-- Token 分布 -->
               <n-space vertical :size="8">
                 <n-space :size="6" wrap>
@@ -253,28 +284,49 @@
             </n-text>
           </n-card>
 
-          <n-card v-if="generating || generatedContent" title="生成内容" size="small" :bordered="false">
+          <n-card
+            v-if="generateInProgress || generatedContent"
+            title="生成内容"
+            size="small"
+            :bordered="false"
+          >
             <template #header-extra>
               <n-space :size="8">
                 <n-button
-                  v-if="generatedContent && !generating"
+                  v-if="generatedContent && !generateInProgress"
                   size="tiny"
                   type="primary"
                   :disabled="isAssistedReadOnly"
                   @click="handleSaveGenerated"
                   :loading="saving"
                 >
-                  保存到章节
+                  保存到所选章节
                 </n-button>
-                <n-button size="tiny" @click="generatedContent = ''" :disabled="generating">清空</n-button>
+                <n-button
+                  size="tiny"
+                  @click="clearGeneratedDraft"
+                  :disabled="generateInProgress"
+                >
+                  清空
+                </n-button>
               </n-space>
             </template>
+            <n-space v-if="generateInProgress" vertical :size="8" style="width: 100%">
+              <n-progress
+                type="line"
+                :percentage="streamProgressPct"
+                :processing="streamProgressPct < 100"
+                :height="8"
+                indicator-placement="inside"
+              />
+              <n-text depth="3" style="font-size: 12px">{{ streamPhaseLabel || '准备中…' }}</n-text>
+            </n-space>
             <n-scrollbar style="max-height: 500px">
               <n-input
                 v-model:value="generatedContent"
                 type="textarea"
                 :autosize="{ minRows: 15, maxRows: 30 }"
-                :readonly="generating"
+                :readonly="generateInProgress"
                 placeholder="生成的内容将在此显示..."
               />
             </n-scrollbar>
@@ -284,8 +336,8 @@
 
       <template #footer>
         <n-space justify="end">
-          <n-button @click="showGenerateModal = false" :disabled="generating">关闭</n-button>
-          <n-button v-if="generating" secondary @click="stopGenerate">停止</n-button>
+          <n-button @click="showGenerateModal = false" :disabled="generateInProgress">关闭</n-button>
+          <n-button v-if="generateInProgress" secondary @click="stopGenerate">停止</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -377,7 +429,7 @@ import {
   analyzeScene,
   retrieveContext,
 } from '../../api/workflow'
-import type { ContextPreviewResult } from '../../api/workflow'
+import type { ContextPreviewResult, GenerateChapterWorkflowResponse } from '../../api/workflow'
 import { chapterApi } from '../../api/chapter'
 import { tensionApi } from '../../api/tools'
 import type { TensionDiagnosis } from '../../api/tools'
@@ -426,6 +478,15 @@ const activeTab = ref('editor')
 const showGenerateModal = ref(false)
 const generateOutline = ref('')
 const generatedContent = ref('')
+/** 弹窗内选中的目标章节（与 useWorkbench 映射一致：id === number） */
+const generateTargetChapterId = ref<number | null>(null)
+const generateInProgress = ref(false)
+const lastWorkflowResult = ref<GenerateChapterWorkflowResponse | null>(null)
+const lastQcChapterNumber = ref<number | null>(null)
+const blurSceneCache = ref<Record<string, unknown> | undefined>(undefined)
+const outlineBlurAnalyzing = ref(false)
+const streamPhaseLabel = ref('')
+const streamProgressPct = ref(0)
 
 // Autopilot 状态
 const autopilotStatus = ref<any>(null)
@@ -535,8 +596,21 @@ const runTensionSlingshot = async () => {
 const contextPreview = ref<ContextPreviewResult | null>(null)
 const loadingContext = ref(false)
 
+const chapterSelectOptions = computed(() =>
+  props.chapters.map(ch => ({
+    label: `第 ${ch.number} 章${ch.title ? ` · ${ch.title.slice(0, 22)}` : ''}`,
+    value: ch.id,
+  }))
+)
+
+const modalTargetChapter = computed(() => {
+  const id = generateTargetChapterId.value
+  if (id == null) return null
+  return props.chapters.find(ch => ch.id === id) ?? null
+})
+
 const previewContext = async () => {
-  const chNum = currentChapter.value?.number
+  const chNum = modalTargetChapter.value?.number
   if (!chNum) return
   loadingContext.value = true
   try {
@@ -552,6 +626,38 @@ const previewContext = async () => {
   }
 }
 
+async function onOutlineBlurAnalyze() {
+  const ch = modalTargetChapter.value
+  const outline = generateOutline.value.trim()
+  if (!ch || !outline || outlineBlurAnalyzing.value || generateInProgress.value) {
+    return
+  }
+  outlineBlurAnalyzing.value = true
+  try {
+    const analysis = await analyzeScene(props.slug, ch.number, outline)
+    blurSceneCache.value = analysis as Record<string, unknown>
+  } catch {
+    blurSceneCache.value = undefined
+  } finally {
+    outlineBlurAnalyzing.value = false
+  }
+}
+
+function clearWorkflowQc() {
+  lastWorkflowResult.value = null
+  lastQcChapterNumber.value = null
+}
+
+function clearGeneratedDraft() {
+  generatedContent.value = ''
+  clearWorkflowQc()
+}
+
+watch(generateTargetChapterId, () => {
+  blurSceneCache.value = undefined
+  contextPreview.value = null
+})
+
 // AbortController：点「停止」时真正取消后端 SSE 流
 const generateAbortCtrl = ref<AbortController | null>(null)
 
@@ -559,10 +665,12 @@ const generateAbortCtrl = ref<AbortController | null>(null)
 // 与 currentChapterId 解耦：用户可以切换章节，生成仍在后台继续
 const generatingChapterId = ref<number | null>(null)
 
-/** 当前视图是否正处于生成中（需要显示生成状态 UI） */
-const generating = computed(() =>
-  generatingChapterId.value !== null &&
-  generatingChapterId.value === props.currentChapterId
+/** 当前视图是否正处于生成中（快速生成按钮 loading） */
+const generating = computed(
+  () =>
+    generateInProgress.value &&
+    generatingChapterId.value !== null &&
+    generatingChapterId.value === props.currentChapterId
 )
 
 const currentChapter = computed(() => {
@@ -634,33 +742,63 @@ const handleGenerateChapter = async () => {
     return
   }
 
+  generateTargetChapterId.value = currentChapter.value.id
   generateOutline.value = `第${currentChapter.value.number}章：${currentChapter.value.title || ''}
 
 承接前情，推进主线与人物节拍；保持人设与叙事节奏一致。`
   generatedContent.value = ''
   contextPreview.value = null
+  blurSceneCache.value = undefined
   showGenerateModal.value = true
 }
 
+function streamPhaseToProgress(phase: string): number {
+  const map: Record<string, number> = {
+    planning: 18,
+    context: 40,
+    llm: 72,
+    post: 92,
+  }
+  return map[phase] ?? 12
+}
+
+function streamPhaseToLabel(phase: string): string {
+  const map: Record<string, string> = {
+    planning: '规划节拍…',
+    context: '组装上下文…',
+    llm: '撰写正文…',
+    post: '质检与收尾…',
+  }
+  return map[phase] ?? phase
+}
+
 const handleStartGenerate = async () => {
-  if (!currentChapter.value) return
+  const target = modalTargetChapter.value
+  if (!target) {
+    message.warning('请选择目标章节')
+    return
+  }
   if (isAssistedReadOnly.value) {
     message.warning('托管运行中不可手动生成')
     return
   }
 
-  const targetChapterId = currentChapter.value.id
-  const targetChapterNumber = currentChapter.value.number
+  const targetChapterId = target.id
+  const targetChapterNumber = target.number
   generatingChapterId.value = targetChapterId
+  generateInProgress.value = true
   generatedContent.value = ''
   sceneDirectorError.value = ''
+  lastWorkflowResult.value = null
+  lastQcChapterNumber.value = null
+  streamPhaseLabel.value = '连接中…'
+  streamProgressPct.value = 8
 
   const ctrl = new AbortController()
   generateAbortCtrl.value = ctrl
 
-  // 可选：Scene Director 分析（失败不阻断生成）
-  let sceneDirectorResult: Record<string, unknown> | undefined
-  if (useSceneDirector.value) {
+  let sceneDirectorResult: Record<string, unknown> | undefined = blurSceneCache.value
+  if (useSceneDirector.value && !sceneDirectorResult) {
     analyzingScene.value = true
     try {
       const outline = generateOutline.value || `第${targetChapterNumber}章：承接前情，推进主线`
@@ -673,49 +811,63 @@ const handleStartGenerate = async () => {
     }
   }
 
+  const defaultOutline = `第${targetChapterNumber}章：承接前情，推进主线`
+
   try {
     await consumeGenerateChapterStream(
       props.slug,
       {
         chapter_number: targetChapterNumber,
-        outline: generateOutline.value || `第${targetChapterNumber}章：承接前情，推进主线`,
+        outline: generateOutline.value || defaultOutline,
         scene_director_result: sceneDirectorResult,
       },
       {
         signal: ctrl.signal,
-        onEvent: (event) => {
-          if (event.type === 'phase') {
-            generatedContent.value += `[阶段: ${event.phase}]\n`
-          } else if (event.type === 'chunk') {
-            generatedContent.value += event.text
-          } else if (event.type === 'done') {
-            generatedContent.value = event.content
-            // 若用户当前就在这一章，弹窗已在显示；若不在则发消息通知
-            if (props.currentChapterId === targetChapterId) {
-              message.success('章节生成完成')
-            } else {
-              message.success(`第 ${targetChapterNumber} 章生成完成，切回该章可查看`)
-            }
-          } else if (event.type === 'error') {
-            generatedContent.value += `\n\n[错误] ${event.message}\n`
-            if (!ctrl.signal.aborted) message.error(`生成失败: ${event.message}`)
+        onPhase: (phase) => {
+          streamPhaseLabel.value = streamPhaseToLabel(phase)
+          streamProgressPct.value = streamPhaseToProgress(phase)
+        },
+        onChunk: (text) => {
+          generatedContent.value += text
+        },
+        onDone: (result) => {
+          lastWorkflowResult.value = result
+          lastQcChapterNumber.value = targetChapterNumber
+          generatedContent.value = result.content
+          streamProgressPct.value = 100
+          streamPhaseLabel.value = '已完成'
+          if (props.currentChapterId === targetChapterId) {
+            message.success('生成完成，质检已同步到「章节状态」')
+          } else {
+            message.success(`第 ${targetChapterNumber} 章生成完成，质检在对应章的「章节状态」查看`)
           }
+          activeTab.value = 'chapter-status'
         },
         onError: (err) => {
-          if (!ctrl.signal.aborted) message.error(`生成失败: ${err}`)
-        }
+          if (!ctrl.signal.aborted) {
+            message.error(`生成失败: ${err}`)
+          }
+        },
       }
     )
-  } catch (error) {
-    if (!ctrl.signal.aborted) message.error('生成失败')
+  } catch {
+    if (!ctrl.signal.aborted) {
+      message.error('生成失败')
+    }
   } finally {
+    generateInProgress.value = false
     generatingChapterId.value = null
     generateAbortCtrl.value = null
+    if (!ctrl.signal.aborted && streamProgressPct.value < 100) {
+      streamPhaseLabel.value = ''
+      streamProgressPct.value = 0
+    }
   }
 }
 
 const handleSaveGenerated = async () => {
-  if (!currentChapter.value || !generatedContent.value) return
+  const saveTarget = modalTargetChapter.value
+  if (!saveTarget || !generatedContent.value) return
   if (isAssistedReadOnly.value) {
     message.warning('托管运行中不可保存生成结果')
     return
@@ -723,13 +875,15 @@ const handleSaveGenerated = async () => {
 
   saving.value = true
   try {
-    await chapterApi.updateChapter(props.slug, currentChapter.value.id, { content: generatedContent.value })
-    chapterContent.value = generatedContent.value
-    originalContent.value = generatedContent.value
-    message.success('保存成功')
+    await chapterApi.updateChapter(props.slug, saveTarget.number, { content: generatedContent.value })
+    if (saveTarget.id === props.currentChapterId) {
+      chapterContent.value = generatedContent.value
+      originalContent.value = generatedContent.value
+    }
+    message.success(`已保存到第 ${saveTarget.number} 章`)
     emit('chapterUpdated')
     showGenerateModal.value = false
-  } catch (error) {
+  } catch {
     message.error('保存失败')
   } finally {
     saving.value = false
@@ -740,6 +894,9 @@ const stopGenerate = () => {
   generateAbortCtrl.value?.abort()
   generateAbortCtrl.value = null
   generatingChapterId.value = null
+  generateInProgress.value = false
+  streamPhaseLabel.value = ''
+  streamProgressPct.value = 0
   message.info('已停止生成')
 }
 

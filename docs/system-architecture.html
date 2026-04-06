@@ -534,7 +534,7 @@ flowchart TB
     end
     subgraph consume["再消费"]
         CTX[context/retrieve 组装上下文]
-        GEN[generate-chapter / 审稿 / 伏笔匹配]
+        GEN[generate-chapter-stream / 审稿 / 伏笔匹配]
     end
     AC -->|确认后| ED
     PUT --> SQ
@@ -782,14 +782,12 @@ flowchart LR
                 </table>
 
                 <h3>生成 / 故事线 / 弧光 / 规划 generation</h3>
-                <p class="mono-path">interfaces/api/v1/generation.py · 路由器 prefix <code>/novels</code> 挂在 <code>/api/v1</code></p>
+                <p class="mono-path">interfaces/api/v1/engine/generation.py · 路由器 prefix <code>/novels</code> 挂在 <code>/api/v1</code></p>
                 <table class="dense">
                     <thead><tr><th></th><th>路径</th><th>说明</th></tr></thead>
                     <tbody>
-                        <tr><td><span class="badge badge-post">POST</span></td><td><code>/api/v1/novels/{id}/generate-chapter</code></td><td>生成章节</td></tr>
-                        <tr><td><span class="badge badge-post">POST</span></td><td><code>/api/v1/novels/{id}/generate-chapter-stream</code></td><td>流式生成</td></tr>
+                        <tr><td><span class="badge badge-post">POST</span></td><td><code>/api/v1/novels/{id}/generate-chapter-stream</code></td><td>流式生成（正文 + 一致性等，done 事件）</td></tr>
                         <tr><td><span class="badge badge-post">POST</span></td><td><code>/api/v1/novels/{id}/hosted-write-stream</code></td><td>托管写作流</td></tr>
-                        <tr><td><span class="badge badge-get">GET</span></td><td><code>/api/v1/novels/{id}/consistency-report</code></td><td>一致性报告</td></tr>
                         <tr><td><span class="badge badge-post">POST</span></td><td><code>/api/v1/novels/{id}/setup/suggest-main-plot-options</code></td><td>主线候选</td></tr>
                         <tr><td><span class="badge badge-get">GET</span></td><td><code>/api/v1/novels/{id}/storylines</code></td><td>故事线列表</td></tr>
                         <tr><td><span class="badge badge-post">POST</span></td><td><code>/api/v1/novels/{id}/storylines</code></td><td>新建故事线</td></tr>

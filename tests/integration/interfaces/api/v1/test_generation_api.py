@@ -3,11 +3,9 @@ import pytest
 from unittest.mock import Mock, AsyncMock
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from interfaces.api.v1.generation import router
+from interfaces.api.v1.engine.generation import router
 from application.workflows.auto_novel_generation_workflow import AutoNovelGenerationWorkflow
-from application.services.hosted_write_service import HostedWriteService
-from application.dtos.generation_result import GenerationResult
-from domain.novel.value_objects.consistency_report import ConsistencyReport
+from application.engine.services.hosted_write_service import HostedWriteService
 from domain.novel.services.storyline_manager import StorylineManager
 from domain.novel.repositories.plot_arc_repository import PlotArcRepository
 from domain.novel.entities.storyline import Storyline
@@ -45,12 +43,6 @@ async def _mock_hosted_stream(*args, **kwargs):
 def mock_workflow():
     """Mock AutoNovelGenerationWorkflow"""
     workflow = Mock(spec=AutoNovelGenerationWorkflow)
-    workflow.generate_chapter = AsyncMock(return_value=GenerationResult(
-        content="Generated chapter content",
-        consistency_report=ConsistencyReport(issues=[], warnings=[], suggestions=[]),
-        context_used="Mock context",
-        token_count=8750
-    ))
     workflow.generate_chapter_stream = _mock_generate_chapter_stream
     return workflow
 
@@ -117,7 +109,7 @@ def app(mock_workflow, mock_storyline_manager, mock_plot_arc_repository, mock_ho
     test_app.include_router(router, prefix="/api/v1")
 
     # Override dependencies
-    from interfaces.api.v1 import generation
+    from interfaces.api.v1.engine import generation
     test_app.dependency_overrides[generation.get_auto_workflow] = lambda: mock_workflow
     test_app.dependency_overrides[generation.get_hosted_write_service] = lambda: mock_hosted_service
     test_app.dependency_overrides[generation.get_storyline_manager] = lambda: mock_storyline_manager
@@ -133,50 +125,29 @@ def client(app):
 
 
 class TestGenerateChapterEndpoint:
-    """测试章节生成端点"""
+    """测试章节生成端点（仅流式）"""
 
-    def test_generate_chapter_success(self, client, mock_workflow):
-        """测试成功生成章节"""
+    def test_generate_chapter_stream_invalid_body(self, client):
+        """流式端点：无效章节号"""
         response = client.post(
-            "/api/v1/novels/novel-1/generate-chapter",
-            json={
-                "chapter_number": 1,
-                "outline": "Chapter 1 outline"
-            }
-        )
-
-        assert response.status_code == 200
-        data = response.json()
-        assert data["content"] == "Generated chapter content"
-        assert "consistency_report" in data
-        assert data["token_count"] == 8750
-
-        # Verify workflow was called
-        mock_workflow.generate_chapter.assert_called_once()
-
-    def test_generate_chapter_invalid_chapter_number(self, client):
-        """测试无效章节号"""
-        response = client.post(
-            "/api/v1/novels/novel-1/generate-chapter",
+            "/api/v1/novels/novel-1/generate-chapter-stream",
             json={
                 "chapter_number": 0,
-                "outline": "Chapter outline"
-            }
+                "outline": "x",
+            },
         )
+        assert response.status_code == 422
 
-        assert response.status_code == 422  # Validation error
-
-    def test_generate_chapter_empty_outline(self, client):
-        """测试空大纲"""
+    def test_generate_chapter_stream_empty_outline(self, client):
+        """流式端点：空大纲"""
         response = client.post(
-            "/api/v1/novels/novel-1/generate-chapter",
+            "/api/v1/novels/novel-1/generate-chapter-stream",
             json={
                 "chapter_number": 1,
-                "outline": ""
-            }
+                "outline": "",
+            },
         )
-
-        assert response.status_code == 422  # Validation error
+        assert response.status_code == 422
 
     def test_generate_chapter_stream_sse(self, client):
         """流式端点返回 SSE"""

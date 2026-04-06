@@ -134,7 +134,7 @@ POST   /api/v1/bible/novels/{novel_id}/bible/world-settings 添加世界设定
 
 ### 章节生成（工作流）
 
-见 `interfaces/api/v1/generation.py`：`POST /api/v1/novels/{novel_id}/generate-chapter`、`generate-chapter-stream`、`hosted-write-stream` 等。
+见 `interfaces/api/v1/engine/generation.py`：`POST /api/v1/novels/{novel_id}/generate-chapter-stream`、`hosted-write-stream` 等。
 
 ## 测试
 
