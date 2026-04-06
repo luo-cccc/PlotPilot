@@ -9,7 +9,7 @@
 当 Token 预算紧张时，从 T3 → T2 → T1 逐层挤压，T0 绝对保护。
 """
 import logging
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
 from datetime import datetime
@@ -20,7 +20,6 @@ from domain.novel.repositories.foreshadowing_repository import ForeshadowingRepo
 from domain.novel.repositories.chapter_repository import ChapterRepository
 from domain.bible.repositories.bible_repository import BibleRepository
 from infrastructure.persistence.database.story_node_repository import StoryNodeRepository
-from infrastructure.persistence.database.chapter_element_repository import ChapterElementRepository
 from domain.ai.services.vector_store import VectorStore
 from domain.ai.services.embedding_service import EmbeddingService
 from application.ai.vector_retrieval_facade import VectorRetrievalFacade
@@ -140,7 +139,6 @@ class ContextBudgetAllocator:
         chapter_repository: Optional[ChapterRepository] = None,
         bible_repository: Optional[BibleRepository] = None,
         story_node_repository: Optional[StoryNodeRepository] = None,
-        chapter_element_repository: Optional[ChapterElementRepository] = None,
         vector_store: Optional[VectorStore] = None,
         embedding_service: Optional[EmbeddingService] = None,
     ):
