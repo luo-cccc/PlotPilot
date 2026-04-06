@@ -53,150 +53,30 @@
           <n-space :size="8" align="center" justify="space-between" style="width: 100%">
             <n-text depth="3">字数: {{ wordCount }}</n-text>
             <n-space :size="8">
-              <n-button size="small" secondary @click="handleGenerateChapter" :loading="generating">
-                AI 生成本章
-              </n-button>
-              <n-tooltip trigger="hover" :disabled="wordCount > 0">
+              <n-tooltip trigger="hover" :disabled="!isAutopilotRunning">
                 <template #trigger>
-                  <n-button size="small" @click="handleReviewChapter" :loading="reviewing" :disabled="wordCount === 0">
-                    AI 审稿
+                  <n-button
+                    size="small"
+                    secondary
+                    @click="handleGenerateChapter"
+                    :loading="generating"
+                    :disabled="isAutopilotRunning"
+                  >
+                    ⚡ 快速生成
                   </n-button>
                 </template>
-                <span>请先在编辑区写入内容或保存后再审稿</span>
+                <span>Autopilot 运行时禁用手动生成</span>
               </n-tooltip>
-              <n-button size="small" secondary @click="openTensionModal" title="卡关时分析张力缺口，获得突破建议">
-                ⚡ 卡关突破
-              </n-button>
-              <n-button size="small" secondary @click="handleContinuePlanning" :disabled="!currentChapter" title="章节写完后检测当前幕进度，决定是否创建下一幕">
-                🎭 续规划
+              <n-button size="small" secondary @click="openTensionModal" title="诊断当前章节张力缺口">
+                🔍 张力诊断
               </n-button>
             </n-space>
           </n-space>
         </div>
-
-        <!-- 续规划 badge -->
-        <n-alert
-          v-if="continuePlanBadge"
-          type="success"
-          :title="continuePlanBadge.message"
-          closable
-          @close="continuePlanBadge = null"
-          style="margin-top: 8px; font-size: 13px"
-        >
-          <n-button size="tiny" type="primary" @click="handleContinuePlanning">
-            打开续规划
-          </n-button>
-        </n-alert>
-
-        <div v-if="reviewResult" class="review-result">
-          <n-card title="审稿结果" size="small" :bordered="false">
-            <template #header-extra>
-              <n-button size="tiny" text @click="reviewResult = null">
-                关闭
-              </n-button>
-            </template>
-            <n-space vertical :size="12">
-              <div class="review-score">
-                <n-text strong>评分: </n-text>
-                <n-tag :type="reviewResult.score >= 80 ? 'success' : reviewResult.score >= 60 ? 'warning' : 'error'" size="large">
-                  {{ reviewResult.score }}/100
-                </n-tag>
-              </div>
-              <n-divider style="margin: 8px 0" />
-              <div v-if="reviewResult.suggestions && reviewResult.suggestions.length > 0">
-                <n-text strong>改进建议:</n-text>
-                <n-list bordered style="margin-top: 8px">
-                  <n-list-item v-for="(suggestion, index) in reviewResult.suggestions" :key="index">
-                    <n-thing>
-                      <template #header>
-                        <n-text>{{ index + 1 }}. {{ suggestion }}</n-text>
-                      </template>
-                    </n-thing>
-                  </n-list-item>
-                </n-list>
-              </div>
-              <div v-else>
-                <n-text depth="3">暂无改进建议</n-text>
-              </div>
-            </n-space>
-          </n-card>
-        </div>
       </div>
 
-      <n-empty v-else description="请从左侧选择章节，或使用顶部「托管连写」批量生成多章" class="work-empty" />
+      <n-empty v-else description="请从左侧选择章节" class="work-empty" />
     </div>
-
-    <!-- 托管连写弹窗 -->
-    <n-modal
-      v-model:show="showHostedModal"
-      preset="card"
-      title="托管连写"
-      style="width: min(820px, 96vw); max-height: min(92vh, 900px)"
-      :segmented="{ content: true, footer: 'soft' }"
-      :mask-closable="!hostedRunning"
-    >
-      <template #header-extra>
-        <n-text depth="3" style="font-size: 12px">自动生成多章，实时显示进度</n-text>
-      </template>
-
-      <n-scrollbar style="max-height: min(78vh, 760px)">
-        <n-space vertical :size="20">
-          <n-alert type="info" :show-icon="true">
-            全自动区间生成：每章先用 AI 生成大纲，再流式生成正文。请确保章节已在书中存在，否则无法自动保存。
-          </n-alert>
-
-          <n-card title="配置" size="small" :bordered="false">
-            <n-space vertical :size="16">
-              <n-form-item label="章节范围" label-placement="left" label-width="80">
-                <n-space :size="12" align="center">
-                  <n-input-number v-model:value="hostedFrom" :min="1" :disabled="hostedRunning" placeholder="起始章" style="width: 100px" />
-                  <n-text depth="3">至</n-text>
-                  <n-input-number v-model:value="hostedTo" :min="1" :disabled="hostedRunning" placeholder="结束章" style="width: 100px" />
-                </n-space>
-              </n-form-item>
-
-              <n-space vertical :size="8">
-                <n-checkbox v-model:checked="hostedAutoOutline" :disabled="hostedRunning" size="small">
-                  自动生成大纲（使用 AI 生成每章要点，推荐）
-                </n-checkbox>
-                <n-checkbox v-model:checked="hostedAutoSave" :disabled="hostedRunning" size="small">
-                  自动保存（每章生成后自动写入章节正文）
-                </n-checkbox>
-              </n-space>
-
-              <n-button
-                type="primary"
-                @click="handleStartHosted"
-                :loading="hostedRunning"
-                :disabled="hostedRunning"
-                size="medium"
-                block
-              >
-                {{ hostedRunning ? '生成中...' : '开始托管连写' }}
-              </n-button>
-            </n-space>
-          </n-card>
-
-          <n-card v-if="hostedRunning || hostedLog" title="生成日志" size="small" :bordered="false">
-            <template #header-extra>
-              <n-button size="tiny" @click="hostedLog = ''" :disabled="hostedRunning">清空</n-button>
-            </template>
-            <n-scrollbar style="max-height: 400px">
-              <div class="output-area">
-                <pre>{{ hostedLog }}</pre>
-              </div>
-            </n-scrollbar>
-          </n-card>
-        </n-space>
-      </n-scrollbar>
-
-      <template #footer>
-        <n-space justify="end">
-          <n-button @click="showHostedModal = false" :disabled="hostedRunning">关闭</n-button>
-          <n-button v-if="hostedRunning" secondary @click="stopHosted">停止</n-button>
-        </n-space>
-      </template>
-    </n-modal>
 
     <!-- AI 生成本章弹窗 -->
     <n-modal
@@ -351,19 +231,19 @@
       </template>
     </n-modal>
 
-    <!-- 张力弹弓弹窗 -->
+    <!-- 张力诊断弹窗 -->
     <n-modal
       v-model:show="showTensionModal"
       preset="card"
-      title="⚡ 卡关突破 · 张力弹弓"
+      title="🔍 张力诊断"
       style="width: min(560px, 96vw)"
     >
       <n-space vertical :size="16">
         <n-alert type="info" :show-icon="false" style="font-size:13px">
-          描述卡关原因（可选），AI 会诊断当前章节张力缺口并给出突破建议。
+          诊断当前章节张力缺口，识别缺失元素并给出突破建议。
         </n-alert>
 
-        <n-form-item label="卡关原因" label-placement="top" :show-feedback="false">
+        <n-form-item label="问题描述（可选）" label-placement="top" :show-feedback="false">
           <n-input
             v-model:value="tensionStuckReason"
             type="textarea"
@@ -427,75 +307,6 @@
       </template>
     </n-modal>
 
-    <!-- AI 续规划弹窗 -->
-    <n-modal
-      v-model:show="showContinueModal"
-      preset="card"
-      title="🎭 AI 续规划"
-      style="width: min(520px, 96vw)"
-      :segmented="{ content: true, footer: 'soft' }"
-    >
-      <template #header-extra>
-        <n-text depth="3" style="font-size:12px">检测当前幕进度，决定是否需要创建下一幕</n-text>
-      </template>
-
-      <n-spin :show="continueLoading" description="正在分析幕结构…">
-        <n-space v-if="continueResult" vertical :size="16">
-          <!-- 幕进度 -->
-          <n-card size="small" :bordered="false" style="background: var(--n-color-modal)">
-            <n-space vertical :size="10">
-              <n-space align="center" :size="8">
-                <n-text strong>当前幕：</n-text>
-                <n-text>{{ continueResult.current_act_title || continueResult.current_act_id || '未知' }}</n-text>
-              </n-space>
-              <n-space align="center" :size="8" v-if="continueResult.completed_chapters != null">
-                <n-text depth="3">幕内进度：</n-text>
-                <n-text>{{ continueResult.completed_chapters }} / {{ continueResult.total_chapters ?? '?' }} 章</n-text>
-              </n-space>
-              <n-text v-if="continueResult.progress_message" depth="3">{{ continueResult.progress_message }}</n-text>
-              <n-text v-if="continueResult.message" depth="3">{{ continueResult.message }}</n-text>
-            </n-space>
-          </n-card>
-
-          <!-- 状态徽章 -->
-          <n-space :size="10">
-            <n-tag :type="continueResult.is_act_complete ? 'success' : 'info'" round>
-              {{ continueResult.is_act_complete ? '✅ 本幕已写完' : '⏳ 本幕尚未完成' }}
-            </n-tag>
-            <n-tag v-if="continueResult.needs_next_act" type="warning" round>
-              🎬 建议创建下一幕
-            </n-tag>
-          </n-space>
-
-          <!-- 创建下一幕 -->
-          <n-alert v-if="continueResult.needs_next_act && continueResult.current_act_id" type="warning" :show-icon="true">
-            AI 判断当前幕已完成，建议创建下一幕以继续故事规划。
-            <template #action>
-              <n-button
-                type="warning"
-                size="small"
-                :loading="creatingNextAct"
-                @click="handleCreateNextAct"
-              >
-                创建下一幕
-              </n-button>
-            </template>
-          </n-alert>
-
-          <n-alert v-else-if="!continueResult.needs_next_act" type="success" :show-icon="true">
-            当前幕还有规划章节未写完，继续创作当前幕即可。
-          </n-alert>
-        </n-space>
-        <n-empty v-else-if="!continueLoading" description="分析结果为空" />
-      </n-spin>
-
-      <template #action>
-        <n-space justify="end">
-          <n-button @click="showContinueModal = false">关闭</n-button>
-        </n-space>
-      </template>
-    </n-modal>
-
     <!-- 完整工作流撰稿弹窗（场景分析 + 流式 + 一致性报告） -->
     <GenerateChapterWorkflowModal
       v-model:show="showWorkflowModal"
@@ -514,7 +325,6 @@ import { useMessage } from 'naive-ui'
 import {
   workflowApi,
   consumeGenerateChapterStream,
-  consumeHostedWriteStream,
   analyzeScene,
   retrieveContext,
 } from '../../api/workflow'
@@ -522,9 +332,8 @@ import type { ContextPreviewResult } from '../../api/workflow'
 import { chapterApi } from '../../api/chapter'
 import { tensionApi } from '../../api/tools'
 import type { TensionDiagnosis } from '../../api/tools'
-import { planningApi } from '../../api/planning'
-import type { ContinuePlanResult } from '../../api/planning'
 import GenerateChapterWorkflowModal from './GenerateChapterWorkflowModal.vue'
+import AutopilotPanel from '../autopilot/AutopilotPanel.vue'
 
 interface Chapter {
   id: number
@@ -558,14 +367,17 @@ const emit = defineEmits<{
 
 const message = useMessage()
 
-const showHostedModal = ref(false)
 const showWorkflowModal = ref(false)
 const showGenerateModal = ref(false)
 const generateOutline = ref('')
 const generatedContent = ref('')
 
-const openHostedWriteModal = () => {
-  showHostedModal.value = true
+// Autopilot 状态
+const autopilotStatus = ref<any>(null)
+const isAutopilotRunning = computed(() => autopilotStatus.value?.autopilot_status === 'running')
+
+const handleAutopilotStatusChange = (status: any) => {
+  autopilotStatus.value = status
 }
 
 // 章节编辑
@@ -573,59 +385,17 @@ const chapterContent = ref('')
 const originalContent = ref('')
 const loading = computed(() => props.chapterLoading)
 const saving = ref(false)
-const reviewing = ref(false)
-const reviewResult = ref<{ score: number; suggestions: string[] } | null>(null)
-
-// 续规划提示：保存后检查幕是否完成
-const continuePlanBadge = ref<{ message: string; suggestCreate: boolean; actId: string } | null>(null)
 
 // Scene Director 开关
 const useSceneDirector = ref(false)
 const analyzingScene = ref(false)
 const sceneDirectorError = ref('')
 
-// 张力弹弓
+// 张力诊断
 const showTensionModal = ref(false)
 const tensionLoading = ref(false)
 const tensionStuckReason = ref('')
 const tensionResult = ref<TensionDiagnosis | null>(null)
-
-// AI 续规划
-const showContinueModal = ref(false)
-const continueLoading = ref(false)
-const continueResult = ref<ContinuePlanResult | null>(null)
-const creatingNextAct = ref(false)
-
-const handleContinuePlanning = async () => {
-  if (!currentChapter.value) return
-  continueLoading.value = true
-  continueResult.value = null
-  showContinueModal.value = true
-  try {
-    continueResult.value = await planningApi.continuePlanning(props.slug, {
-      current_chapter: currentChapter.value.number,
-    })
-  } catch {
-    message.error('续规划失败，请确认 AI 密钥已配置')
-    showContinueModal.value = false
-  } finally {
-    continueLoading.value = false
-  }
-}
-
-const handleCreateNextAct = async () => {
-  if (!continueResult.value?.current_act_id) return
-  creatingNextAct.value = true
-  try {
-    await planningApi.createNextAct(continueResult.value.current_act_id)
-    message.success('下一幕已创建，请刷新结构树')
-    showContinueModal.value = false
-  } catch {
-    message.error('创建下一幕失败')
-  } finally {
-    creatingNextAct.value = false
-  }
-}
 
 const openTensionModal = () => {
   tensionResult.value = null
@@ -672,7 +442,6 @@ const previewContext = async () => {
 
 // AbortController：点「停止」时真正取消后端 SSE 流
 const generateAbortCtrl = ref<AbortController | null>(null)
-const hostedAbortCtrl = ref<AbortController | null>(null)
 
 // 正在生成的章节 ID（null = 不在生成中）
 // 与 currentChapterId 解耦：用户可以切换章节，生成仍在后台继续
@@ -708,7 +477,6 @@ watch(() => props.currentChapterId, (id) => {
   if (id !== null && id === generatingChapterId.value) {
     showGenerateModal.value = true
   }
-  reviewResult.value = null
 })
 
 const handleContentChange = () => {
@@ -719,33 +487,15 @@ const handleSave = async () => {
   if (!currentChapter.value) return
 
   saving.value = true
-  continuePlanBadge.value = null
   try {
     await chapterApi.updateChapter(props.slug, currentChapter.value.id, { content: chapterContent.value })
     originalContent.value = chapterContent.value
     message.success('保存成功')
     emit('chapterUpdated')
-    // 后台检查幕进度（不阻塞保存流程）
-    _checkActCompletionAfterSave(currentChapter.value.number)
   } catch (error) {
     message.error('保存失败')
   } finally {
     saving.value = false
-  }
-}
-
-async function _checkActCompletionAfterSave(chapterNumber: number) {
-  try {
-    const r = await planningApi.continuePlanning(props.slug, { current_chapter: chapterNumber })
-    if (r.act_completed && r.suggest_create_next) {
-      continuePlanBadge.value = {
-        message: r.message || '本幕已完成，建议创建下一幕',
-        suggestCreate: true,
-        actId: r.current_act_id ?? '',
-      }
-    }
-  } catch {
-    // 失败静默
   }
 }
 
@@ -864,100 +614,6 @@ const stopGenerate = () => {
   generatingChapterId.value = null
   message.info('已停止生成')
 }
-
-const handleReviewChapter = async () => {
-  if (!currentChapter.value) return
-
-  reviewing.value = true
-  try {
-    const result = await workflowApi.reviewChapter(props.slug, currentChapter.value.id)
-    reviewResult.value = {
-      score: result.score,
-      suggestions: result.suggestions || []
-    }
-    message.success(`审稿完成，评分: ${result.score}/100`)
-  } catch (error: any) {
-    if (error.response?.status === 501) {
-      message.warning('审稿功能开发中')
-    } else {
-      message.error('审稿失败')
-    }
-  } finally {
-    reviewing.value = false
-  }
-}
-
-// 托管连写
-const hostedFrom = ref(1)
-const hostedTo = ref(5)
-const hostedAutoSave = ref(true)
-const hostedAutoOutline = ref(true)
-const hostedRunning = ref(false)
-const hostedLog = ref('')
-
-const handleStartHosted = async () => {
-  hostedRunning.value = true
-  hostedLog.value = ''
-  const ctrl = new AbortController()
-  hostedAbortCtrl.value = ctrl
-
-  try {
-    await consumeHostedWriteStream(
-      props.slug,
-      {
-        from_chapter: hostedFrom.value,
-        to_chapter: hostedTo.value,
-        auto_save: hostedAutoSave.value,
-        auto_outline: hostedAutoOutline.value
-      },
-      {
-        signal: ctrl.signal,
-        onEvent: (event) => {
-          if (event.type === 'session') {
-            hostedLog.value += `[会话开始] 章节 ${event.from_chapter}-${event.to_chapter}，共 ${event.total} 章\n\n`
-          } else if (event.type === 'chapter_start') {
-            hostedLog.value += `\n[章节 ${event.chapter}] 开始生成 (${event.index}/${event.total})\n`
-          } else if (event.type === 'outline') {
-            hostedLog.value += `[大纲] ${event.text}\n\n`
-          } else if (event.type === 'phase') {
-            hostedLog.value += `[阶段: ${event.phase}]\n`
-          } else if (event.type === 'done') {
-            hostedLog.value += `[完成] 章节 ${event.chapter} 生成完成，${typeof event.content === 'string' ? event.content.length : 0} 字符\n`
-          } else if (event.type === 'saved') {
-            if (event.ok) {
-              hostedLog.value += `[保存] 章节 ${event.chapter} 已保存${event.created ? '（新建）' : ''}\n`
-            } else {
-              hostedLog.value += `[保存失败] 章节 ${event.chapter}: ${event.message}\n`
-            }
-          } else if (event.type === 'session_done') {
-            hostedLog.value += `\n[会话完成] 所有章节生成完毕\n`
-            message.success('托管连写完成')
-            emit('chapterUpdated')
-          } else if (event.type === 'error') {
-            hostedLog.value += `\n[错误] ${event.message}\n`
-            if (!ctrl.signal.aborted) message.error(`生成失败: ${event.message}`)
-          }
-        },
-        onError: (err) => {
-          hostedLog.value += `\n[连接错误] ${err}\n`
-          if (!ctrl.signal.aborted) message.error(`托管连写失败: ${err}`)
-        }
-      }
-    )
-  } catch (error) {
-    if (!ctrl.signal.aborted) message.error('托管连写失败')
-  } finally {
-    hostedRunning.value = false
-    hostedAbortCtrl.value = null
-  }
-}
-
-const stopHosted = () => {
-  hostedAbortCtrl.value?.abort()
-  hostedAbortCtrl.value = null
-  hostedRunning.value = false
-  message.info('已停止托管连写')
-}
 </script>
 
 <style scoped>
@@ -990,6 +646,12 @@ const stopHosted = () => {
 
 .work-sub {
   font-size: 13px;
+}
+
+.autopilot-container {
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--aitext-split-border);
+  background: var(--app-surface);
 }
 
 .work-main {
