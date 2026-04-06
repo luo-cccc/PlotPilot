@@ -12,6 +12,7 @@ import json
 import logging
 import re
 import uuid
+from datetime import datetime
 from typing import Any, List, Optional, Tuple
 
 from domain.ai.services.llm_service import LLMService, GenerationConfig
@@ -388,6 +389,110 @@ def _auto_advance_milestone(
         logger.warning("自动推进里程碑失败 novel=%s ch=%s: %s", novel_id, chapter_number, e)
 
 
+def _initialize_first_chapter_snapshot(
+    novel_id: str,
+    chapter_number: int,
+) -> None:
+    """首章初始化：创建初始快照。"""
+    try:
+        from infrastructure.persistence.database.connection import get_database
+
+        db = get_database()
+        conn = db.get_connection()
+        cursor = conn.cursor()
+
+        # 检查是否已有快照
+        cursor.execute(
+            "SELECT COUNT(*) FROM novel_snapshots WHERE novel_id = ?",
+            (novel_id,)
+        )
+        count = cursor.fetchone()[0]
+
+        if count > 0:
+            logger.info("首章已有快照，跳过初始化 novel=%s", novel_id)
+            return
+
+        # 创建初始快照
+        snapshot_id = f"snapshot-{uuid.uuid4()}"
+        now = datetime.utcnow().isoformat()
+
+        cursor.execute("""
+            INSERT INTO novel_snapshots (
+                id, novel_id, trigger_type, name, description,
+                chapter_pointers, bible_state, foreshadow_state, graph_state,
+                branch_name, parent_snapshot_id, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            snapshot_id,
+            novel_id,
+            "AUTO",
+            "第1章完成",
+            "小说开篇，自动创建初始快照",
+            json.dumps([f"{novel_id}-ch{chapter_number}"]),
+            json.dumps({"exists": True, "timestamp": now}),
+            json.dumps({}),
+            json.dumps({}),
+            "main",
+            None,
+            now
+        ))
+
+        conn.commit()
+        logger.info("首章自动创建快照 novel=%s snapshot=%s", novel_id, snapshot_id)
+
+    except Exception as e:
+        logger.warning("首章快照初始化失败 novel=%s: %s", novel_id, e)
+
+
+def _initialize_first_chapter_storyline(
+    novel_id: str,
+    chapter_number: int,
+    bundle: dict,
+    storyline_repository: Any,
+) -> None:
+    """首章初始化：基于章末总结创建主线故事线。
+
+    使用 LLM 生成的 summary 作为依据，而不是硬匹配关键词。
+    summary 来自 sync_chapter_narrative_after_save 中的 llm_chapter_extract_bundle。
+    """
+    try:
+        from domain.novel.value_objects.novel_id import NovelId
+        from domain.novel.value_objects.storyline_type import StorylineType
+        from domain.novel.value_objects.storyline_status import StorylineStatus
+        from domain.novel.entities.storyline import Storyline
+
+        # 检查是否已有故事线
+        existing = storyline_repository.get_by_novel_id(NovelId(novel_id))
+        if existing:
+            logger.info("首章已有故事线，跳过初始化 novel=%s", novel_id)
+            return
+
+        # 使用 LLM 生成的章末总结作为故事线描述
+        summary = bundle.get("summary", "")
+
+        # 默认创建主线，名称和描述基于首章内容
+        storyline_name = "主线"
+        storyline_desc = summary if summary else "小说主线剧情"
+
+        # 创建主线
+        main_storyline = Storyline(
+            id=str(uuid.uuid4()),
+            novel_id=NovelId(novel_id),
+            storyline_type=StorylineType.MAIN_PLOT,
+            status=StorylineStatus.ACTIVE,
+            estimated_chapter_start=chapter_number,
+            estimated_chapter_end=chapter_number + 20,  # 预估20章
+            name=storyline_name,
+            description=storyline_desc,
+            progress_summary=summary  # 将首章摘要作为初始进展
+        )
+        storyline_repository.save(main_storyline)
+        logger.info("首章自动初始化主线 novel=%s desc=%s", novel_id, storyline_desc[:50])
+
+    except Exception as e:
+        logger.warning("首章故事线初始化失败 novel=%s: %s", novel_id, e)
+
+
 def _auto_adjust_storyline_range(
     novel_id: str,
     chapter_number: int,
@@ -539,11 +644,19 @@ def persist_bundle_extras(
     if storyline_repository and storyline_progress:
         _auto_advance_milestone(novel_id, chapter_number, storyline_progress, storyline_repository)
 
-    # 5. 自动调整故事线范围
-    if storyline_repository and storyline_progress:
-        _auto_adjust_storyline_range(novel_id, chapter_number, storyline_progress, storyline_repository)
+    # 5. 自动调整故事线范围（或首章初始化）
+    if storyline_repository:
+        if chapter_number == 1 and not storyline_progress:
+            # 首章且 LLM 未返回故事线进展，强制初始化主线
+            _initialize_first_chapter_storyline(novel_id, chapter_number, bundle, storyline_repository)
+        elif storyline_progress:
+            _auto_adjust_storyline_range(novel_id, chapter_number, storyline_progress, storyline_repository)
 
-    # 6. 对话提取（写入 narrative_events 表）
+    # 6. 首章初始化快照
+    if chapter_number == 1:
+        _initialize_first_chapter_snapshot(novel_id, chapter_number)
+
+    # 7. 对话提取（写入 narrative_events 表）
     dialogues = bundle.get("dialogues") or []
     if narrative_event_repository and dialogues:
         try:
