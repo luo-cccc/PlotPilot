@@ -65,7 +65,8 @@ class VoiceDriftService:
             adjective_density=metrics["adjective_density"],
             avg_sentence_length=metrics["avg_sentence_length"],
             sentence_count=metrics["sentence_count"],
-            similarity_score=similarity if similarity is not None else 0.0,
+            # 存 None 而非 0.0，避免漂移检测误判
+            similarity_score=similarity,
         )
 
         drift_alert = self._check_drift_alert(novel_id)
@@ -140,10 +141,16 @@ class VoiceDriftService:
         return round((adj_sim + len_sim) / 2, 4)
 
     def _check_drift_alert(self, novel_id: str) -> bool:
-        """检查最近 N 章是否连续低于阈值。"""
+        """检查最近 N 章是否连续低于阈值。
+
+        跳过 similarity_score 为 None 的章节（无指纹基准时不告警）。
+        """
         scores = self.score_repo.list_by_novel(novel_id, limit=DRIFT_ALERT_CONSECUTIVE * 2)
-        if len(scores) < DRIFT_ALERT_CONSECUTIVE:
+        # 过滤掉 None 值（无指纹基准的章节）
+        valid_scores = [s for s in scores if s.get("similarity_score") is not None]
+
+        if len(valid_scores) < DRIFT_ALERT_CONSECUTIVE:
             return False
 
-        recent = scores[-DRIFT_ALERT_CONSECUTIVE:]
+        recent = valid_scores[-DRIFT_ALERT_CONSECUTIVE:]
         return all(s["similarity_score"] < DRIFT_ALERT_THRESHOLD for s in recent)

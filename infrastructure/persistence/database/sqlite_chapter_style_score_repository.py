@@ -16,7 +16,7 @@ class SqliteChapterStyleScoreRepository:
         adjective_density: float,
         avg_sentence_length: float,
         sentence_count: int,
-        similarity_score: float,
+        similarity_score: Optional[float],  # None 表示无指纹基准
     ) -> str:
         existing = self.get_by_chapter(novel_id, chapter_number)
         if existing:
